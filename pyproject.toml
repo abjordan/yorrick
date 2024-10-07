@@ -1,0 +1,16 @@
+[project]
+name = "yorrick"
+version = "0.1.0"
+description = "A modern-day alchemical skull, powered by AI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.51.0",
+    "pvcobra>=2.0.3",
+    "pvleopard>=2.0.3",
+    "pvporcupine>=3.0.3",
+    "pvrecorder>=1.2.3",
+    "pyaudio>=0.2.14",
+    "rpi-gpio>=0.7.1",
+    "ruff>=0.6.9",
+]

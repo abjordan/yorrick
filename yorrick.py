@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+# System Imports
 import datetime
 import io
 import os
@@ -8,13 +9,16 @@ import random
 import struct
 import sys
 import threading
+from time import time, sleep
 
-from time import time
-
+# Third-Party Imports
 from openai import OpenAI
+import pygame
 import RPi.GPIO as GPIO
 
 
+
+# Local Imports
 from api_keys import openai_api_key
 
 
@@ -70,7 +74,23 @@ class ChatClient():
         # TODO: Check for errors, etc.
         return answer
 
+    def speak(self, message):
+        response = self._client.audio.speech.create(
+            model="tts-1",
+            voice="fable",
+            input=message
+        )
 
+        response.stream_to_file("speech.mp3")
+
+        pygame.mixer.init()
+        pygame.mixer.music.load("speech.mp3")
+        pygame.mixer.music.play()
+
+        while pygame.mixer.music.get_busy():
+            sleep(0.2)
+
+    
 if __name__ == "__main__":
     print("Alas, poor Yorrick...")
 
@@ -78,6 +98,8 @@ if __name__ == "__main__":
 
     resp = client.generate_response("Tell me how to make chocolate chip cookies in 100 words or less")
     print(">>> ", resp)
+    client.speak(resp)
     resp = client.generate_response("Those were awful")
     print(">>> ", resp)
+    client.speak(resp)
     

@@ -11,6 +11,7 @@ dependencies = [
     "pvporcupine>=3.0.3",
     "pvrecorder>=1.2.3",
     "pyaudio>=0.2.14",
+    "pygame>=2.6.1",
     "rpi-gpio>=0.7.1",
     "ruff>=0.6.9",
 ]

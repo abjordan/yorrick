@@ -1,9 +1,9 @@
-from yorrick import ExpiringList
+from yorrick import *
 
 import time
+from api_keys import openai_api_key
 
-if __name__ == "__main__":
-
+def test_list():
     el = ExpiringList(3)
 
     start = time.time()
@@ -19,4 +19,14 @@ if __name__ == "__main__":
         time.sleep(1)
 
     print(f"List at { time.time() - start } : { el.get() }")
+
+def test_speak():
+    client = ChatClient(openai_api_key)
+    client.speak("Hello world - this is a test of the text to speech system")
+
+if __name__ == "__main__":
+
+    test_list()
+
+    test_speak()
     

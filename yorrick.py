@@ -56,50 +56,7 @@ class ExpiringList():
 
     def clear(self):
         self.items = []
-
-
-class AudioMux(threading.Thread):
-    def __init__(self):
-        super().__init__()
-        self._callbacks = []
-        self._stop = False
-
-    def add_listener(self, callback):
-        logger.debug(f"Adding callback to mux: {callback}")
-        self._callbacks.append(callback)
-
-    def remove_listener(self, callback):
-        logger.debug(f"Removing callback from mux: {callback}")
-        if callback in self._callbacks:
-            self._callbacks.remove(callback)
-
-    def run(self):
-        logger.debug("Setting up audio")
-        audio = pyaudio.PyAudio()
-        stream = audio.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=16000,
-            input=True,
-            frames_per_buffer=FRAME_LENGTH,
-        )
-
-        logger.debug("Recording audio stream")
-        while not self._stop:
-            data = stream.read(FRAME_LENGTH, exception_on_overflow=False)
-            for callback in self._callbacks:
-                callback(data)
-
-        logger.debug("Finishing audio stream")
-        stream.stop_stream()
-        stream.close()
-        audio.terminate()
-
-    def stop(self):
-        logger.debug("Received command to stop recording")
-        self._stop = True
-
-        
+       
 class ChatClient():
 
     system_message = {
@@ -150,81 +107,154 @@ class ChatClient():
         )
         return transcript.text
 
-class WaitForVoice(threading.Thread):
-    def __init__(self, api_key, audio_mux):
+class AudioMux(threading.Thread):
+    def __init__(self):
         super().__init__()
-        self._api_key = api_key
+        self._callbacks = []
+        self._stop = False
+
+    def add_listener(self, callback):
+        logger.trace(f"Adding callback to mux: {callback}")
+        self._callbacks.append(callback)
+
+    def remove_listener(self, callback):
+        logger.trace(f"Removing callback from mux: {callback}")
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def run(self):
+        logger.debug("Setting up audio")
+        audio = pyaudio.PyAudio()
+        stream = audio.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=16000,
+            input=True,
+            frames_per_buffer=FRAME_LENGTH,
+        )
+
+        logger.debug("Recording audio stream")
+        while not self._stop:
+            data = stream.read(FRAME_LENGTH, exception_on_overflow=False)
+            for callback in self._callbacks:
+                callback(data)
+
+        logger.debug("Finishing audio stream")
+        stream.stop_stream()
+        stream.close()
+        audio.terminate()
+
+    def stop(self):
+        logger.debug("Received command to stop recording")
+        self._stop = True
+
+
+class AudioConsumer(threading.Thread):
+
+    def __init__(self, audio_mux):
+        super().__init__()
         self._audio_mux = audio_mux
+        self._queue = queue.Queue()
+        self._should_stop = False
+
+    def _process(self, chunk):
+        self._queue.put(chunk)
+
+    def process_chunk(self, chunk):
+        # To be implemented by subclasses
+        pass
+
+    def stop(self):
+        self._should_stop = True
+
+    def pre_run(self):
+        # To be implemented by subclasses
+        pass
+
+    def post_run(self):
+        # To be implemented by subclasses
+        pass
+    
+    def run(self):
+        self.pre_run()
+        self._audio_mux.add_listener(self._process)
+
+        while not self._should_stop:
+            try:
+                chunk = self._queue.get(block=True, timeout=0.2)
+                self.process_chunk(chunk)
+            except queue.Empty:
+                # Queue is empty - ignore it but check to see if we should exit yet
+                pass
+            
+        self._audio_mux.remove_listener(self._process)            
+        self.post_run()
+
+    def finish(self):
+        self._should_stop = True
+
+class WaitForVoice(AudioConsumer):
+    def __init__(self, audio_mux, api_key):
+        super().__init__(audio_mux)
+        self._api_key = api_key
         self._voice_detected = False
         self._cobra = None
 
+    def pre_run(self):
+        logger.info("Waiting for a voice")
+        self._cobra = pvcobra.create(access_key=self._api_key)
+
+    def post_run(self):
+        self._cobra.delete()
+        
     def process_chunk(self, chunk):
         listen_pcm = struct.unpack_from("h" * FRAME_LENGTH, chunk)
         if self._cobra.process(listen_pcm) > 0.3:
             logger.info("Voice detected!")
             self._voice_detected = True
-        
-    def run(self):
-        logger.debug("Waiting for voice...")
-        self._audio_mux.add_listener(self.process_chunk)
-        self._cobra = pvcobra.create(access_key=self._api_key)
-        
-        while not self._voice_detected:
-            pass
+            self.finish()
 
-        self._audio_mux.remove_listener(self.process_chunk)
-        self._cobra.delete()
-
-class DetectSilence(threading.Thread):
-    def __init__(self, api_key, audio_mux):
-        super().__init__()
+class DetectSilence(AudioConsumer):
+    def __init__(self, audio_mux, api_key):
+        super().__init__(audio_mux)
         self._api_key = api_key
-        self._audio_mux = audio_mux
         self._silence_detected = False
         self._cobra = None
 
     def process_chunk(self, chunk):
         listen_pcm = struct.unpack_from("h" * FRAME_LENGTH, chunk)
-        if self._cobra.process(chunk) > 0.2:
-            #logger.debug("Heard voice")
+        if self._cobra.process(listen_pcm) > 0.2:
             self._last_voice_time = time()
         else:
             silence_duration = time() - self._last_voice_time
-            if silence_duration > 1.3:
+            if silence_duration > 1.0:
                 logger.info("End of query detected")
                 self._silence_detected = True
-        
-    def run(self):
-        logger.debug("Waiting for silence...")
+                self.finish()
+
+    def pre_run(self):
+        logger.info("Waiting for silence...")
         self._cobra = pvcobra.create(access_key=self._api_key)
         self._last_voice_time = time()
-        self._audio_mux.add_listener(self.process_chunk)
-        while not self._silence_detected:
-            pass
 
-        self._audio_mux.remove_listener(self.process_chunk)
+    def post_run(self):
         self._cobra.delete()
     
 
-class WavWriter(threading.Thread):
+class WavWriter(AudioConsumer):
     def __init__(self, audio_mux):
-        super().__init__()
+        super().__init__(audio_mux)
         self._audio_mux = audio_mux
-        self._please_stop = False
         self._wav_file_name = None
         self._chunks = []
 
     def process_chunk(self, chunk):
         self._chunks.append(chunk)
         
-    def run(self):
-        logger.info("Recording query")
+    def pre_run(self):
+        logger.info("Recording query")        
 
-        self._audio_mux.add_listener(self.process_chunk)
-        
-        while not self._please_stop:
-            pass
-
+    def post_run(self):
         self._audio_mux.remove_listener(self.process_chunk)
 
         temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
@@ -240,9 +270,6 @@ class WavWriter(threading.Thread):
             self._wav_file.writeframes(chunk)
 
         self._wav_file.close()
-
-    def stop(self):
-        self._please_stop = True
 
     def get_wav_file(self):
         return self._wav_file_name
@@ -270,33 +297,34 @@ if __name__ == "__main__":
         mux.start()
 
         # Wait for speech to start
-        w = WaitForVoice(picovoice_api_key, mux)
+        w = WaitForVoice(mux, picovoice_api_key)
         w.start()
         w.join()
 
+        logger.debug("--------------")
+        
         # Start recording audio to a WAV file
         wav_writer = WavWriter(mux)
         wav_writer.start()
         
         # Wait for speech to end
-        s = DetectSilence(picovoice_api_key, mux)
+        s = DetectSilence(mux, picovoice_api_key)
         s.start()
-        while not s._silence_detected:
-            sleep(0.1)
+        s.join()
+
+        logger.debug("--------------")
 
         logger.info("Past silence detection")
-        wav_writer.stop()
+        wav_writer.finish()
         wav_writer.join()
         mux.stop()
         
         wav_file = wav_writer.get_wav_file()
 
         logger.debug(f"Query written to {wav_file}")
-
-        break
         
-        # sound = pydub.AudioSegment.from_file(wav_data, format="wav")
-        # mp3_data = sound.export("/tmp/yorrick-input.mp3")
+        sound = pydub.AudioSegment.from_file(wav_file, format="wav")
+        mp3_data = sound.export("/tmp/yorrick-input.mp3")
 
         print(f"Transcribing result...", end='')
         transcript = oai_client.transcribe(mp3_data)

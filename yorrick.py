@@ -65,7 +65,8 @@ class ChatClient():
             You are an intelligent ghost, trapped in a plastic skull by a wizard. You are
             bound by darkest magic to answer a question to the best of your ability, but
             are not very happy about it. You have to answer truthfully, but you don't have
-            to be polite. You don't use contractions in your responses.
+            to be polite. You don't use contractions in your responses. Answer as briefly
+            as possible.
         """
     }
     
@@ -281,14 +282,14 @@ if __name__ == "__main__":
     
     r = random.Random()
     prompt_files = list(glob.glob("media/prompt_*.mp3"))
+    think_files = list(glob.glob("media/think_*.mp3"))
 
     while True:
         # Wait for a button push
         input("Press enter to record...")
 
         # Speak one of the prompts
-        # play_sound_file(r.choice(prompt_files))
-        play_sound_file("media/prompt_0.mp3")
+        play_sound_file(r.choice(prompt_files))
 
         # Get the user's response
 
@@ -314,6 +315,10 @@ if __name__ == "__main__":
 
         logger.debug("--------------")
 
+        sound = r.choice(think_files)
+        t = threading.Thread(target=play_sound_file, kwargs={"filename": sound})
+        t.start()
+        
         logger.info("Past silence detection")
         wav_writer.finish()
         wav_writer.join()
@@ -322,6 +327,7 @@ if __name__ == "__main__":
         wav_file = wav_writer.get_wav_file()
 
         logger.debug(f"Query written to {wav_file}")
+
         
         sound = pydub.AudioSegment.from_file(wav_file, format="wav")
         mp3_data = sound.export("/tmp/yorrick-input.mp3")
@@ -334,5 +340,6 @@ if __name__ == "__main__":
         print("<<< ", transcript)
         response = oai_client.generate_response(transcript)
         print(">>> ", response)
+        t.join()
         oai_client.speak(response)
         

@@ -31,12 +31,16 @@ RECORDING_DEVICE_INDEX = 0
 
 FRAME_LENGTH = 512
 
-def play_sound_file(filename):
+def play_sound_file(filename, jabber = None):
     pygame.mixer.init()
     pygame.mixer.music.load(filename)
     pygame.mixer.music.play()
     while pygame.mixer.music.get_busy():
         sleep(0.2)
+
+    if jabber is not None:
+        jabber.shutup()
+        jabber.join()
             
 # Time-boxed context window for conversations
 class ExpiringList():
@@ -274,7 +278,31 @@ class WavWriter(AudioConsumer):
 
     def get_wav_file(self):
         return self._wav_file_name
-        
+
+class Chatter(threading.Thread):
+
+    def __init__(self):
+        super().__init__()
+        self._shutup = False
+    
+    def run(self):
+        GPIO.setmode(GPIO.BOARD)
+        GPIO.setup(3, GPIO.OUT)
+        pwm = GPIO.PWM(3, 50)
+        pwm.start(0)
+        while not self._shutup:
+            pwm.ChangeDutyCycle(11.5)
+            sleep(0.2)
+            pwm.ChangeDutyCycle(10.5)
+            sleep(0.2)
+
+        pwm.ChangeDutyCycle(11.5)
+        pwm.stop()
+        GPIO.cleanup()
+
+    def shutup(self):
+        self._shutup = True
+    
 if __name__ == "__main__":
     print("Alas, poor Yorrick...")
 
@@ -288,9 +316,16 @@ if __name__ == "__main__":
         # Wait for a button push
         input("Press enter to record...")
 
+        # TODO: Only play a prompt if it's been longer than
+        # a couple of seconds
+        
         # Speak one of the prompts
+        j = Chatter()
+        j.start()
         play_sound_file(r.choice(prompt_files))
-
+        j.shutup()
+        j.join()
+        
         # Get the user's response
 
         # Start the audio mux
@@ -316,7 +351,9 @@ if __name__ == "__main__":
         logger.debug("--------------")
 
         sound = r.choice(think_files)
-        t = threading.Thread(target=play_sound_file, kwargs={"filename": sound})
+        j = Chatter()
+        j.start()
+        t = threading.Thread(target=play_sound_file, kwargs={"filename": sound, "jabber": j})
         t.start()
         
         logger.info("Past silence detection")
@@ -341,5 +378,8 @@ if __name__ == "__main__":
         response = oai_client.generate_response(transcript)
         print(">>> ", response)
         t.join()
+        j = Chatter()
+        j.start()
         oai_client.speak(response)
+        j.shutup()
         

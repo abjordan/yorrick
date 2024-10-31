@@ -296,7 +296,7 @@ class Chatter(threading.Thread):
             pwm.ChangeDutyCycle(10.5)
             sleep(0.2)
 
-        pwm.ChangeDutyCycle(11.5)
+        pwm.ChangeDutyCycle(10.0)
         pwm.stop()
         GPIO.cleanup()
 
